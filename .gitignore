@@ -331,3 +331,6 @@ ASALocalRun/
 
 
 .publish/
+
+# editor / agent workspace data
+.workbuddy-ai/
