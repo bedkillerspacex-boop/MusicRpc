@@ -11,9 +11,7 @@
     <VersionPrefix>1.0</VersionPrefix>
     <VersionSuffix>1</VersionSuffix>
     <Version>3.1</Version>
-    <PackageProjectUrl>https://github.com/Kxnrl/NetEase-Cloud-Music-DiscordRPC</PackageProjectUrl>
     <Copyright>©2026 Kyle</Copyright>
-    <RepositoryUrl>https://github.com/Kxnrl/NetEase-Cloud-Music-DiscordRPC</RepositoryUrl>
     <PlatformTarget>x64</PlatformTarget>
     <!-- No WinRT API is used; skip the Windows SDK projection assemblies (~25 MB in the single-file exe) -->
     <IncludeWindowsSDKRefFrameworkReferences>false</IncludeWindowsSDKRefFrameworkReferences>

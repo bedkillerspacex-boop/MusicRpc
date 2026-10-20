@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using DiscordRPC;
 using DiscordRPC.Helper;
+using Kxnrl.Vanessa.Lyrics;
+using Kxnrl.Vanessa.Models;
 using Kxnrl.Vanessa.Players;
 using Button = DiscordRPC.Button;
 
@@ -16,8 +18,10 @@ internal class Program
     private const string NetEaseAppId = "481562643958595594";
     private const string TencentAppId = "903485504899665990";
 
-    // Discord RPC limits: Details/State/LargeImageText max 128 UTF-8 bytes, image keys max 256 (see DiscordRPC.RichPresence)
+    // Discord RPC limits: Details/State/LargeImageText max 128 UTF-8 bytes, button label
+    // max 32, image keys max 256 (see DiscordRPC.RichPresence)
     private const int MaxRpcTextBytes     = 128;
+    private const int MaxRpcButtonBytes   = 32;
     private const int MaxRpcImageKeyBytes = 256;
 
     // Issue #44: state-driven presence updates.
@@ -29,6 +33,13 @@ internal class Program
     private const int    ClearDebounceLoops   = 6;    // ~1.4s at 233ms/loop: absorbs transient nulls while the player rewrites playingList on song switch
     private const double SeekThresholdSeconds = 3.0;  // playback position drift beyond this means the user sought / track wrapped / long rebuffer
     private const int    ResyncIntervalMs     = 5000; // periodic resync while nothing changed: self-heals dropped updates and accumulated drift
+
+    // Discord accepts roughly 5 presence updates per 20 seconds. Song / pause / seek
+    // changes still go out immediately; lyric advances queue up behind this interval
+    // and are flushed by a later loop (the presence stays dirty until then).
+    private const int MinSendIntervalMs = 4000;
+
+    private const int LyricRetryDelayMs = 30000;
 
     private static async Task Main()
     {
@@ -44,7 +55,9 @@ internal class Program
             return;
         }
 
-        if (Constants.GlobalConfig.IsFirstLoad)
+        var config = Constants.GlobalConfig;
+
+        if (config.IsFirstLoad)
         {
             Win32Api.AutoStart.Set(true);
         }
@@ -67,7 +80,58 @@ internal class Program
 
         var exitButton = new ToolStripMenuItem("Exit");
         var autoButton = new ToolStripMenuItem("AutoStart" + "    " + (Win32Api.AutoStart.Check() ? "√" : "✘"));
+
+        var lyricsButton      = new ToolStripMenuItem();
+        var translationButton = new ToolStripMenuItem();
+        var layoutMenu        = new ToolStripMenuItem("Lyrics Layout");
+
+        var layoutLabels = new[]
+        {
+            "2nd line (artist in 1st line)",
+            "2nd line (artist in tooltip)",
+            "in button label",
+        };
+
+        var layoutItems = new ToolStripMenuItem[layoutLabels.Length];
+
+        for (var i = 0; i < layoutItems.Length; i++)
+        {
+            var index = i;
+            var item  = new ToolStripMenuItem(layoutLabels[index]);
+
+            item.Click += (_, _) =>
+            {
+                config.LyricsLayout = (LyricsPlacement) index;
+                config.Save();
+                RefreshLyricsMenu();
+            };
+
+            layoutItems[index] = item;
+            layoutMenu.DropDownItems.Add(item);
+        }
+
+        lyricsButton.Click += (_, _) =>
+        {
+            config.ShowLyrics = !config.ShowLyrics;
+            config.Save();
+            RefreshLyricsMenu();
+        };
+
+        translationButton.Click += (_, _) =>
+        {
+            config.ShowTranslation = !config.ShowTranslation;
+            config.Save();
+            RefreshLyricsMenu();
+        };
+
+        RefreshLyricsMenu();
+
         notifyMenu.Items.Add(autoButton);
+        notifyMenu.Items.Add(new ToolStripSeparator());
+        notifyMenu.Items.Add(lyricsButton);
+        notifyMenu.Items.Add(translationButton);
+        notifyMenu.Items.Add(layoutMenu);
+        notifyMenu.Items.Add(new ToolStripSeparator());
         notifyMenu.Items.Add(exitButton);
 
         var notifyIcon = new NotifyIcon()
@@ -97,6 +161,20 @@ internal class Program
 
         _ = Task.Run(async () => await UpdateThread(netEase, tencent));
         Application.Run();
+
+        void RefreshLyricsMenu()
+        {
+            lyricsButton.Text      = "Show Lyrics" + "    " + (config.ShowLyrics ? "√" : "✘");
+            translationButton.Text = "Show Translation" + "    " + (config.ShowTranslation ? "√" : "✘");
+
+            translationButton.Enabled = config.ShowLyrics;
+
+            for (var i = 0; i < layoutItems.Length; i++)
+            {
+                layoutItems[i].Text    = layoutLabels[i] + "    " + ((int) config.LyricsLayout == i ? "√" : "✘");
+                layoutItems[i].Enabled = config.ShowLyrics;
+            }
+        }
     }
 
     private static async Task UpdateThread(DiscordRpcClient netEase, DiscordRpcClient tencent)
@@ -109,8 +187,12 @@ internal class Program
         string? sentIdentity = null;
         double  sentSchedule = 0;
         double  sentDuration = 0;
+        var     sentLyric    = -1;
         long    lastSendTick = Environment.TickCount64 - ResyncIntervalMs;
         var     nullStreak   = 0;
+
+        var lyricState = new LyricState();
+        var config     = Constants.GlobalConfig;
 
         while (true)
         {
@@ -118,6 +200,7 @@ internal class Program
             {
                 IMusicPlayer?     player    = null;
                 DiscordRpcClient? rpcClient = null;
+                var               isNetEase = false;
 
                 if (Win32Api.User32.GetWindowTitle("OrpheusBrowserHost", out _, out var netEaseProcessId))
                 {
@@ -128,6 +211,7 @@ internal class Program
                             : new NetEase(netEaseProcessId);
 
                     rpcClient = netEase;
+                    isNetEase = true;
                 }
                 else if (Win32Api.User32.GetWindowTitle("QQMusic_Daemon_Wnd", out _, out var tencentId))
                 {
@@ -150,6 +234,7 @@ internal class Program
                     lastRpcClient.ClearPresence();
 
                     sentIdentity  = null;
+                    sentLyric     = -1;
                     lastRpcClient = null;
                 }
 
@@ -170,6 +255,7 @@ internal class Program
                         lastRpcClient?.ClearPresence();
 
                         sentIdentity  = null;
+                        sentLyric     = -1;
                         lastRpcClient = null;
                     }
 
@@ -180,6 +266,18 @@ internal class Program
 
                 var now = Environment.TickCount64;
 
+                // Lyrics: reset on song change, fetch in the background. The 233ms loop
+                // never waits for the network, it just picks the lyrics up once they land.
+                lyricState.Track(info.Identity);
+
+                if (config.ShowLyrics && isNetEase && lyricState.TryClaim(info.Identity, now))
+                {
+                    _ = FetchLyrics(lyricState, info.Identity);
+                }
+
+                var lyrics     = config.ShowLyrics ? lyricState.Current : null;
+                var lyricIndex = lyrics?.IndexOf(info.Schedule) ?? -1;
+
                 if (info.Pause)
                 {
                     // Pause means "show nothing": clear immediately (a state change
@@ -189,6 +287,7 @@ internal class Program
                         rpcClient.ClearPresence();
 
                         sentIdentity = null;
+                        sentLyric    = -1;
                         lastSendTick = now;
                     }
                 }
@@ -206,48 +305,27 @@ internal class Program
                     var predicted = sentSchedule + ((now - lastSendTick) / 1000.0);
                     var seeked    = !songChanged && Math.Abs(info.Schedule - predicted) > SeekThresholdSeconds;
 
-                    if (!songChanged && !durationChanged && !seeked && now - lastSendTick < ResyncIntervalMs)
+                    var lyricChanged = !songChanged && lyricIndex != sentLyric;
+                    var urgent       = songChanged || durationChanged || seeked;
+
+                    if (!urgent && !lyricChanged && now - lastSendTick < ResyncIntervalMs)
                     {
                         continue;
                     }
-                    rpcClient.Update(rpc =>
+
+                    // lyric-only advances are throttled; staying dirty makes the next
+                    // loop send them as soon as the interval has elapsed.
+                    if (!urgent && now - lastSendTick < MinSendIntervalMs)
                     {
-                        rpc.Details = $"🎵 {info.Title}".TruncateByUtf8Bytes(MaxRpcTextBytes);
-                        rpc.State   = $"🎤 {info.Artists}".TruncateByUtf8Bytes(MaxRpcTextBytes);
-                        rpc.Type    = ActivityType.Listening;
+                        continue;
+                    }
 
-                        // single UtcNow sample so end - start == Duration exactly
-                        var start = DateTime.UtcNow.Subtract(TimeSpan.FromSeconds(info.Schedule));
-
-                        rpc.Timestamps = new Timestamps(start, start.Add(TimeSpan.FromSeconds(info.Duration)));
-
-                        rpc.Assets = new Assets
-                        {
-                            // fall back to Discord's default artwork when the cover url exceeds the limit
-                            LargeImageKey  = info.Cover.WithinLength(MaxRpcImageKeyBytes) ? info.Cover : string.Empty,
-                            LargeImageText = $"💿 {info.Album}".TruncateByUtf8Bytes(MaxRpcTextBytes),
-                            SmallImageKey  = "timg",
-                            SmallImageText = "NetEase CloudMusic",
-                        };
-
-                        rpc.Buttons =
-                        [
-                            new Button
-                            {
-                                Label = "🎧 Listen",
-                                Url   = info.Url,
-                            },
-                            new Button
-                            {
-                                Label = "👏 View App on GitHub",
-                                Url   = "https://github.com/Kxnrl/NetEase-Cloud-Music-DiscordRPC",
-                            },
-                        ];
-                    });
+                    rpcClient.Update(rpc => BuildPresence(rpc, info, config, lyrics, lyricIndex));
 
                     sentIdentity  = info.Identity;
                     sentSchedule  = info.Schedule;
                     sentDuration  = info.Duration;
+                    sentLyric     = lyricIndex;
                     lastSendTick  = now;
                     lastRpcClient = rpcClient;
                 }
@@ -264,6 +342,157 @@ internal class Program
                 GC.WaitForFullGCComplete();
 
                 await Task.Delay(TimeSpan.FromMilliseconds(233));
+            }
+        }
+    }
+
+    private static async Task FetchLyrics(LyricState state, string songId)
+    {
+        var lyrics = await NetEaseLyrics.FetchAsync(songId).ConfigureAwait(false);
+
+        state.Complete(songId, lyrics);
+    }
+
+    private static void BuildPresence(RichPresence rpc,
+                                      PlayerInfo   info,
+                                      Configurations config,
+                                      SongLyrics?  lyrics,
+                                      int          lyricIndex)
+    {
+        var lyric = lyrics is not null && lyricIndex >= 0
+            ? config.ShowTranslation && lyrics.TranslationAt(lyricIndex).Length > 0
+                ? lyrics.TranslationAt(lyricIndex)
+                : lyrics.TextAt(lyricIndex)
+            : string.Empty;
+
+        var lyricLine = lyric.Length > 0 && config.LyricsLayout != LyricsPlacement.ButtonLabel;
+
+        rpc.Details = config.LyricsLayout == LyricsPlacement.ArtistInDetails && info.Artists.Length > 0
+            ? $"🎵 {info.Title} · {info.Artists}".TruncateByUtf8Bytes(MaxRpcTextBytes)
+            : $"🎵 {info.Title}".TruncateByUtf8Bytes(MaxRpcTextBytes);
+
+        rpc.State = lyricLine
+            ? $"🎶 {lyric}".TruncateByUtf8Bytes(MaxRpcTextBytes)
+            : $"🎤 {info.Artists}".TruncateByUtf8Bytes(MaxRpcTextBytes);
+
+        rpc.Type = ActivityType.Listening;
+
+        // single UtcNow sample so end - start == Duration exactly
+        var start = DateTime.UtcNow.Subtract(TimeSpan.FromSeconds(info.Schedule));
+
+        rpc.Timestamps = new Timestamps(start, start.Add(TimeSpan.FromSeconds(info.Duration)));
+
+        var albumText = config.LyricsLayout == LyricsPlacement.ArtistInTooltip && info.Artists.Length > 0
+            ? $"💿 {info.Album} · {info.Artists}"
+            : $"💿 {info.Album}";
+
+        rpc.Assets = new Assets
+        {
+            // fall back to Discord's default artwork when the cover url exceeds the limit
+            LargeImageKey  = info.Cover.WithinLength(MaxRpcImageKeyBytes) ? info.Cover : string.Empty,
+            LargeImageText = albumText.TruncateByUtf8Bytes(MaxRpcTextBytes),
+            SmallImageKey  = "timg",
+            SmallImageText = "NetEase CloudMusic",
+        };
+
+        var listen = new Button
+        {
+            Label = "🎧 Listen",
+            Url   = info.Url,
+        };
+
+        // the only slot that renders *below* the progress bar is a button label
+        if (config.LyricsLayout == LyricsPlacement.ButtonLabel && lyric.Length > 0)
+        {
+            rpc.Buttons =
+            [
+                listen,
+                new Button
+                {
+                    Label = lyric.TruncateByUtf8Bytes(MaxRpcButtonBytes),
+                    Url   = info.Url,
+                },
+            ];
+        }
+        else
+        {
+            rpc.Buttons = [listen];
+        }
+    }
+
+    /// <summary>
+    ///     Lyrics of the current song, written by a background task and read by the
+    ///     polling loop. Results that arrive after the song changed are discarded.
+    /// </summary>
+    private sealed class LyricState
+    {
+        private readonly object _gate = new();
+
+        private string?     _songId;
+        private SongLyrics? _lyrics;
+        private string?     _requestedId;
+        private long        _retryAt;
+
+        public SongLyrics? Current
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _lyrics;
+                }
+            }
+        }
+
+        public void Track(string songId)
+        {
+            lock (_gate)
+            {
+                if (string.Equals(_songId, songId, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                _songId      = songId;
+                _lyrics      = null;
+                _requestedId = null;
+                _retryAt     = 0;
+            }
+        }
+
+        public bool TryClaim(string songId, long now)
+        {
+            lock (_gate)
+            {
+                if (_lyrics is not null || _requestedId == songId || now < _retryAt)
+                {
+                    return false;
+                }
+
+                _requestedId = songId;
+
+                return true;
+            }
+        }
+
+        public void Complete(string songId, SongLyrics? lyrics)
+        {
+            lock (_gate)
+            {
+                if (!string.Equals(_songId, songId, StringComparison.Ordinal))
+                {
+                    return; // song changed while downloading: drop it
+                }
+
+                if (lyrics is null)
+                {
+                    _requestedId = null;
+                    _retryAt     = Environment.TickCount64 + LyricRetryDelayMs;
+
+                    return;
+                }
+
+                _lyrics = lyrics;
             }
         }
     }
