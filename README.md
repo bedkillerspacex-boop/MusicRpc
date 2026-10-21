@@ -18,8 +18,8 @@
 
 | 选项 | 效果 |
 | --- | --- |
-| `2nd line (artist in 1st line)` | 默认。第一行「歌名 · 歌手」，第二行滚歌词 |
-| `2nd line (artist in tooltip)` | 第一行只留歌名，歌手挪到封面悬停提示 |
+| `2nd line (artist on album line)` | 默认。第一行只留歌名，第二行滚歌词，歌手跟在专辑那行后面。没歌词的时候第二行直接不显示，不会拿歌手顶上去 |
+| `2nd line (artist in 1st line)` | 第一行「歌名 · 歌手」，第二行滚歌词 |
 | `in button label` | 歌名歌手都不动，歌词做成第二个按钮 —— 唯一能显示在进度条下方的位置 |
 
 `Show Translation` 打开后优先显示译文（网易云有译文才显示），默认关着。
@@ -52,17 +52,29 @@ dotnet publish Vanessa/Vanessa.csproj -c Release -r win-x64 --self-contained fal
 {
   "showLyrics": true,
   "showTranslation": false,
-  "lyricsLayout": "artistInDetails"
+  "lyricsLayout": "artistInTooltip",
+  "neteaseAppId": "",
+  "tencentAppId": ""
 }
 ```
+
+`lyricsLayout` 的取值：`artistInTooltip`（默认）/ `artistInDetails` / `buttonLabel`。
+
+## 改「正在听 xxx」显示的名字
+
+`正在听` 后面那个名字是 Discord 里注册的应用名，不是程序里写死的字符串，所以没法直接改。
+
+想要显示成自己的名字，去 [Discord Developer Portal](https://discord.com/developers/applications) 建一个应用（不用建 Bot，也不用审核），名字随便起，然后把 **Application ID** 填进配置的 `neteaseAppId`，重启程序就生效。
+
+用自定义 ID 之后，卡片左下角那个小徽章会消失——那是上游应用里的图片资源，你的新应用没有，程序会自动不发这个字段，免得显示成裂图。专辑封面走的是外链，不受影响。
 
 ## 几个已知问题
 
 - 歌词只有网易云能取。QQ 音乐那边还是只显示歌手，它没有能对得上的接口。
 - 歌词是整行跳的，不是逐字。Discord 卡片本来就要两秒才刷新一次，逐字没意义。
-- 纯音乐、没歌词的歌会退回显示歌手，不会挂着「暂无歌词」。
+- 纯音乐、没歌词的歌：默认排法下第二行直接不显示，切到「歌手在第一行」的排法才会退回显示歌手。
 - 连续切歌的时候状态更新会被压到 4 秒一次，这是 Discord 自己的频率限制，不是卡了。
-- 歌词拉取失败（断网、接口抽风）不弹窗，就是安静地显示歌手，不影响正常同步。
+- 歌词拉取失败（断网、接口抽风）不弹窗，就是安静地不显示歌词，不影响正常同步。
 
 ## 版权
 

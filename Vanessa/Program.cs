@@ -15,8 +15,11 @@ namespace Kxnrl.Vanessa;
 
 internal class Program
 {
-    private const string NetEaseAppId = "481562643958595594";
-    private const string TencentAppId = "903485504899665990";
+    // The name Discord shows ("Listening to ...") comes from the application registered
+    // for this id, not from anything we send. Keep the upstream ids as defaults; a custom
+    // id lets you show your own application name.
+    private const string DefaultNetEaseAppId = "481562643958595594";
+    private const string DefaultTencentAppId = "903485504899665990";
 
     // Discord RPC limits: Details/State/LargeImageText max 128 UTF-8 bytes, button label
     // max 32, image keys max 256 (see DiscordRPC.RichPresence)
@@ -62,8 +65,11 @@ internal class Program
             Win32Api.AutoStart.Set(true);
         }
 
-        var netEase = new DiscordRpcClient(NetEaseAppId);
-        var tencent = new DiscordRpcClient(TencentAppId);
+        var netEaseAppId = Pick(config.NetEaseAppId, DefaultNetEaseAppId);
+        var tencentAppId = Pick(config.TencentAppId, DefaultTencentAppId);
+
+        var netEase = new DiscordRpcClient(netEaseAppId);
+        var tencent = new DiscordRpcClient(tencentAppId);
         netEase.Initialize();
         tencent.Initialize();
 
@@ -87,9 +93,18 @@ internal class Program
 
         var layoutLabels = new[]
         {
+            "2nd line (artist on album line)",
             "2nd line (artist in 1st line)",
-            "2nd line (artist in tooltip)",
             "in button label",
+        };
+
+        // keep the menu order stable but map it onto the enum explicitly: the album-line
+        // layout is the default, so it is listed first.
+        var layoutValues = new[]
+        {
+            LyricsPlacement.ArtistInTooltip,
+            LyricsPlacement.ArtistInDetails,
+            LyricsPlacement.ButtonLabel,
         };
 
         var layoutItems = new ToolStripMenuItem[layoutLabels.Length];
@@ -101,7 +116,7 @@ internal class Program
 
             item.Click += (_, _) =>
             {
-                config.LyricsLayout = (LyricsPlacement) index;
+                config.LyricsLayout = layoutValues[index];
                 config.Save();
                 RefreshLyricsMenu();
             };
@@ -171,7 +186,7 @@ internal class Program
 
             for (var i = 0; i < layoutItems.Length; i++)
             {
-                layoutItems[i].Text    = layoutLabels[i] + "    " + ((int) config.LyricsLayout == i ? "√" : "✘");
+                layoutItems[i].Text    = layoutLabels[i] + "    " + (layoutValues[i] == config.LyricsLayout ? "√" : "✘");
                 layoutItems[i].Enabled = config.ShowLyrics;
             }
         }
@@ -320,7 +335,13 @@ internal class Program
                         continue;
                     }
 
-                    rpcClient.Update(rpc => BuildPresence(rpc, info, config, lyrics, lyricIndex));
+                    // the "timg" badge asset only exists on the upstream applications; a
+                    // custom app id would render a missing-asset placeholder instead.
+                    var stockAssets = isNetEase
+                        ? string.Equals(config.NetEaseAppId, DefaultNetEaseAppId, StringComparison.Ordinal)
+                        : string.Equals(config.TencentAppId, DefaultTencentAppId, StringComparison.Ordinal);
+
+                    rpcClient.Update(rpc => BuildPresence(rpc, info, config, lyrics, lyricIndex, stockAssets));
 
                     sentIdentity  = info.Identity;
                     sentSchedule  = info.Schedule;
@@ -353,11 +374,15 @@ internal class Program
         state.Complete(songId, lyrics);
     }
 
+    private static string Pick(string? value, string fallback)
+        => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
     private static void BuildPresence(RichPresence rpc,
                                       PlayerInfo   info,
                                       Configurations config,
                                       SongLyrics?  lyrics,
-                                      int          lyricIndex)
+                                      int          lyricIndex,
+                                      bool         stockAssets)
     {
         var lyric = lyrics is not null && lyricIndex >= 0
             ? config.ShowTranslation && lyrics.TranslationAt(lyricIndex).Length > 0
@@ -371,9 +396,20 @@ internal class Program
             ? $"🎵 {info.Title} · {info.Artists}".TruncateByUtf8Bytes(MaxRpcTextBytes)
             : $"🎵 {info.Title}".TruncateByUtf8Bytes(MaxRpcTextBytes);
 
-        rpc.State = lyricLine
-            ? $"🎶 {lyric}".TruncateByUtf8Bytes(MaxRpcTextBytes)
-            : $"🎤 {info.Artists}".TruncateByUtf8Bytes(MaxRpcTextBytes);
+        if (lyricLine)
+        {
+            rpc.State = $"🎶 {lyric}".TruncateByUtf8Bytes(MaxRpcTextBytes);
+        }
+        else if (config.LyricsLayout == LyricsPlacement.ArtistInTooltip)
+        {
+            // the artist already rides along on the album line here, so it must not get
+            // a line of its own: no lyric means no second line at all.
+            rpc.State = null;
+        }
+        else
+        {
+            rpc.State = $"🎤 {info.Artists}".TruncateByUtf8Bytes(MaxRpcTextBytes);
+        }
 
         rpc.Type = ActivityType.Listening;
 
@@ -391,8 +427,8 @@ internal class Program
             // fall back to Discord's default artwork when the cover url exceeds the limit
             LargeImageKey  = info.Cover.WithinLength(MaxRpcImageKeyBytes) ? info.Cover : string.Empty,
             LargeImageText = albumText.TruncateByUtf8Bytes(MaxRpcTextBytes),
-            SmallImageKey  = "timg",
-            SmallImageText = "NetEase CloudMusic",
+            SmallImageKey  = stockAssets ? "timg" : null,
+            SmallImageText = stockAssets ? "NetEase CloudMusic" : null,
         };
 
         var listen = new Button

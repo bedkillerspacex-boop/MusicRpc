@@ -13,10 +13,10 @@ namespace Kxnrl.Vanessa;
 /// </summary>
 internal enum LyricsPlacement
 {
-    /// <summary>Details = "title · artist", State = lyric (default).</summary>
+    /// <summary>Details = "title · artist", State = lyric.</summary>
     ArtistInDetails = 0,
 
-    /// <summary>Details = "title", State = lyric, artist moves to the large image tooltip.</summary>
+    /// <summary>Details = "title", State = lyric only, artist appended to the album line.</summary>
     ArtistInTooltip = 1,
 
     /// <summary>Details/State unchanged, lyric shown on a second button below the progress bar.</summary>
@@ -44,7 +44,16 @@ internal sealed class Configurations
 
     public bool ShowTranslation { get; set; }
 
-    public LyricsPlacement LyricsLayout { get; set; } = LyricsPlacement.ArtistInDetails;
+    public LyricsPlacement LyricsLayout { get; set; } = LyricsPlacement.ArtistInTooltip;
+
+    /// <summary>
+    ///     Discord application id used for the NetEase presence. The application name is
+    ///     what Discord prints after "Listening to", so pointing this at your own
+    ///     application renames that line. Empty falls back to the built-in one.
+    /// </summary>
+    public string NetEaseAppId { get; set; } = string.Empty;
+
+    public string TencentAppId { get; set; } = string.Empty;
 
     public Configurations()
     {
@@ -80,6 +89,8 @@ internal sealed class Configurations
             ShowLyrics      = file.ShowLyrics;
             ShowTranslation = file.ShowTranslation;
             LyricsLayout    = file.LyricsLayout;
+            NetEaseAppId    = file.NetEaseAppId ?? string.Empty;
+            TencentAppId    = file.TencentAppId ?? string.Empty;
         }
         catch (Exception e) when (e is IOException
                                        or JsonException
@@ -99,6 +110,8 @@ internal sealed class Configurations
                 ShowLyrics      = ShowLyrics,
                 ShowTranslation = ShowTranslation,
                 LyricsLayout    = LyricsLayout,
+                NetEaseAppId    = NetEaseAppId,
+                TencentAppId    = TencentAppId,
             };
 
             File.WriteAllText(_path, JsonSerializer.Serialize(file, JsonOptions), Encoding.UTF8);
@@ -116,5 +129,9 @@ internal sealed class ConfigFile
 
     public bool ShowTranslation { get; set; }
 
-    public LyricsPlacement LyricsLayout { get; set; } = LyricsPlacement.ArtistInDetails;
+    public LyricsPlacement LyricsLayout { get; set; } = LyricsPlacement.ArtistInTooltip;
+
+    public string? NetEaseAppId { get; set; }
+
+    public string? TencentAppId { get; set; }
 }
