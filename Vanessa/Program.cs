@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -375,7 +376,16 @@ internal class Program
     }
 
     private static string Pick(string? value, string fallback)
-        => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+    {
+        var trimmed = value?.Trim();
+
+        // A wrong id makes Discord silently drop every activity: the process looks
+        // healthy, the tray icon is there, and nothing ever shows up. Only accept
+        // something shaped like a snowflake, anything else falls back to the built-in id.
+        return trimmed is { Length: >= 17 and <= 20 } && trimmed.All(char.IsAsciiDigit)
+            ? trimmed
+            : fallback;
+    }
 
     private static void BuildPresence(RichPresence rpc,
                                       PlayerInfo   info,
