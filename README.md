@@ -4,6 +4,19 @@
 
 这是 [Kxnrl/NetEase-Cloud-Music-DiscordRPC](https://github.com/Kxnrl/NetEase-Cloud-Music-DiscordRPC) 的魔改版，在原版基础上主要是加了歌词显示。
 
+## 下载
+
+去 [Releases](https://github.com/bedkillerspacex-boop/MusicRpc/releases/latest) 拿，两个包任选：
+
+| 文件 | 说明 |
+| --- | --- |
+| `MusicRpc-x.y.z-x64.msi` | 推荐。双击安装，装到 `%LocalAppData%\Programs\MusicRpc`，不需要管理员权限，自带开始菜单快捷方式和开机启动 |
+| `MusicRpc.exe` | 免安装单文件，丢哪都能跑 |
+
+两个都要求先装 [.NET 10 桌面运行时 (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)。
+
+卸载走「设置 → 应用 → MusicRpc」，配置在 `%LocalAppData%\Vanessa\config.json` 不会被删。
+
 ## 和原版差在哪
 
 - **Discord 卡片里能看到歌词了**。歌词从网易云官方接口拉，跟着播放进度走，不用装插件。

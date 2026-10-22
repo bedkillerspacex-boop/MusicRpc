@@ -334,3 +334,6 @@ ASALocalRun/
 
 # editor / agent workspace data
 .workbuddy-ai/
+
+# installer build output
+dist/

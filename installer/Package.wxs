@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package Name="MusicRpc"
+           Manufacturer="bedkillerspacex-boop"
+           Version="3.2.0"
+           UpgradeCode="43F932DD-F44F-4A7C-BD10-EFF793FD5526"
+           Scope="perUser"
+           Compressed="yes"
+           Codepage="936"
+           InstallerVersion="500">
+
+    <SummaryInformation Description="网易云音乐 / QQ 音乐 Discord 状态同步，带歌词显示" />
+
+    <MajorUpgrade DowngradeErrorMessage="已安装更新的版本。" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="MusicRpc" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppMenuFolder" Name="MusicRpc" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="Product" Directory="INSTALLFOLDER">
+      <Component Id="MainExecutable" Guid="*">
+        <File Id="MusicRpcExe"
+              Source="publish\MusicRpc.exe"
+              KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut"
+                    Directory="AppMenuFolder"
+                    Name="MusicRpc"
+                    Description="网易云音乐 / QQ 音乐 Discord 状态同步"
+                    WorkingDirectory="INSTALLFOLDER" />
+        </File>
+
+        <RegistryValue Root="HKCU"
+                       Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                       Name="NCM-DiscordRpc"
+                       Type="string"
+                       Value="[INSTALLFOLDER]MusicRpc.exe"
+                       KeyPath="no" />
+
+        <RemoveFolder Id="RemoveAppMenuFolder" Directory="AppMenuFolder" On="uninstall" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="DefaultFeature" Title="MusicRpc" Level="1">
+      <ComponentGroupRef Id="Product" />
+    </Feature>
+
+    <util:CloseApplication Id="CloseMusicRpc"
+                           Target="MusicRpc.exe"
+                           CloseMessage="yes"
+                           RebootPrompt="no" />
+
+    <Launch Condition="Installed OR NOT VersionNT64" Message="MusicRpc 需要 64 位 Windows。" />
+  </Package>
+</Wix>
